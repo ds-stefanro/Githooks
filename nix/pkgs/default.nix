@@ -21,7 +21,7 @@ buildGo126Module rec {
   # };
 
   modRoot = "./githooks";
-  vendorHash = "sha256-ULPbM/6DqyVPwq68MnpVesS3w1uxKBbVIZ7i5Kng+1Y=";
+  vendorHash = "sha256-bHQJqDo+awZpQvCni28b7p/tbHEJWtHX/fF18mZNObI=";
   nativeBuildInputs = [ makeWrapper ];
   buildInputs = [ git ];
 
