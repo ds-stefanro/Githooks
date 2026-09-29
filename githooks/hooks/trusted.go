@@ -4,6 +4,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	cm "github.com/gabyx/githooks/githooks/common"
 	"github.com/gabyx/githooks/githooks/git"
@@ -48,7 +49,12 @@ func GetTrustedRemotes(gitx *git.Context, scope git.ConfigScope) []string {
 // `patterns` together with the first pattern which matched.
 // An empty `url` never matches, such that a repository without a
 // remote is never trusted by a pattern like `*`.
-func matchesTrustedRemote(patterns []string, url string) (isTrusted bool, pattern string) {
+func matchesTrustedRemote(
+	log cm.ILogContext,
+	patterns []string,
+	url string,
+) (isTrusted bool, pattern string) {
+	url = strings.TrimSpace(url)
 	if strs.IsEmpty(url) {
 		return
 	}
@@ -60,10 +66,10 @@ func matchesTrustedRemote(patterns []string, url string) (isTrusted bool, patter
 
 		// Urls are always separated by `/`, therefore match
 		// platform independent of the path separator.
-		matched, err := cm.GlobMatchSlashes(p, url)
-		cm.DebugAssertNoErrorF(err, "Malformed trusted remote pattern '%s'.", p)
-
+		matched, err := cm.GlobMatchString(p, url)
 		if err != nil {
+			log.WarnF("Malformed trusted remote pattern '%s'.", p)
+
 			continue
 		}
 
@@ -80,13 +86,14 @@ func matchesTrustedRemote(patterns []string, url string) (isTrusted bool, patter
 // configuration `GitCKTrustedRemotes` together with the pattern which matched.
 // The url is matched as configured, meaning e.g. `https://` and `ssh://` urls
 // of the same repository need separate patterns.
-func IsRemoteTrusted(gitx *git.Context) (isTrusted bool, pattern string) {
+func IsRemoteTrusted(log cm.ILogContext, gitx *git.Context) (isTrusted bool, pattern string) {
 	patterns := GetTrustedRemotes(gitx, git.Traverse)
 	if len(patterns) == 0 {
 		return
 	}
 
 	return matchesTrustedRemote(
+		log,
 		patterns,
 		gitx.GetConfig("remote."+TrustedRemoteName+".url", git.LocalScope))
 }
@@ -104,6 +111,7 @@ func IsRemoteTrusted(gitx *git.Context) (isTrusted bool, pattern string) {
 // was denied by the user stays untrusted.
 // On any error `false` is reported together with the error.
 func IsRepoTrusted(
+	log cm.ILogContext,
 	gitx *git.Context,
 	repoPath string) (isTrusted bool, hasTrustFile bool, trustAllSet bool) {
 	trustFile := GetTrustMarkerFile(repoPath)
@@ -117,7 +125,7 @@ func IsRepoTrusted(
 		return
 	}
 
-	isTrusted, _ = IsRemoteTrusted(gitx)
+	isTrusted, _ = IsRemoteTrusted(log, gitx)
 
 	return
 }

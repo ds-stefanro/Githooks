@@ -357,7 +357,7 @@ func runTrustedRemotes(ctx *ccm.CmdContext, opts *SetOptions, gitOpts *GitOption
 	case opts.Print:
 		list := func(p []string) string {
 			if len(p) == 0 {
-				return "[0]: none"
+				return "no entries set"
 			}
 
 			return strs.Fmt("[%v]:\n%s", len(p),
@@ -378,7 +378,7 @@ func runTrustedRemotes(ctx *ccm.CmdContext, opts *SetOptions, gitOpts *GitOption
 
 		// Report the effect on the current repository, if we are inside one.
 		if _, _, _, err := ctx.GitX.GetRepoRoot(); err == nil {
-			if isTrusted, pattern := hooks.IsRemoteTrusted(ctx.GitX); isTrusted {
+			if isTrusted, pattern := hooks.IsRemoteTrusted(ctx.Log, ctx.GitX); isTrusted {
 				ctx.Log.InfoF(
 					"The current repository is trusted by pattern '%s'.", pattern)
 			} else {
@@ -1040,7 +1040,7 @@ The '--add' option accepts multiple '<pattern>' arguments.`,
 	trustedRemotesCmd.Flags().
 		BoolVar(&gitOpts.Local, "local", false, "Use the local Git configuration.")
 	trustedRemotesCmd.Flags().
-		BoolVar(&gitOpts.Global, "global", false, "Use the global Git configuration (default).")
+		BoolVar(&gitOpts.Global, "global", false, "Use the global Git configuration (default if '--local' not given).")
 
 	configSetOptions(trustedRemotesCmd, setOpts, &optsPSR, ctx.Log, 1, -1)
 	configCmd.AddCommand(ccm.SetCommandDefaults(ctx.Log, trustedRemotesCmd))

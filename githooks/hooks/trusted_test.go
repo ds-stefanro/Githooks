@@ -13,233 +13,235 @@ import (
 )
 
 func TestTrustedRemoteMatch(t *testing.T) {
-	patterns := []string{"https://github.com/my-org/**"}
+	log, err := cm.CreateLogContext(false, false)
+	assert.NoError(t, err)
 
-	isTrusted, pattern := matchesTrustedRemote(
-		patterns, "https://github.com/my-org/my-repo.git")
-	assert.True(t, isTrusted)
-	assert.Equal(t, patterns[0], pattern)
+	myOrg := "https://github.com/my-org/**"
 
-	// Other organizations must not match.
-	isTrusted, _ = matchesTrustedRemote(
-		patterns, "https://github.com/other-org/my-repo.git")
-	assert.False(t, isTrusted)
+	tests := []struct {
+		name     string
+		patterns []string
+		url      string
+		trusted  bool
+		pattern  string
+	}{
+		{"match", []string{myOrg},
+			"https://github.com/my-org/my-repo.git", true, myOrg},
+		{"other organization", []string{myOrg},
+			"https://github.com/other-org/my-repo.git", false, ""},
+		{"other host", []string{myOrg},
+			"https://gitlab.com/my-org/my-repo.git", false, ""},
+		{"surrounding whitespace in url", []string{myOrg},
+			"  https://github.com/my-org/my-repo.git \n", true, myOrg},
 
-	// Other hosts must not match.
-	isTrusted, _ = matchesTrustedRemote(
-		patterns, "https://gitlab.com/my-org/my-repo.git")
-	assert.False(t, isTrusted)
-}
+		// `*` does not match over `/`, `**` does.
+		{"single star", []string{"https://github.com/my-org/*"},
+			"https://github.com/my-org/my-repo.git", true, "https://github.com/my-org/*"},
+		{"single star over separator", []string{"https://github.com/my-org/*"},
+			"https://github.com/my-org/sub/my-repo.git", false, ""},
+		{"double star over separator", []string{myOrg},
+			"https://github.com/my-org/sub/my-repo.git", true, myOrg},
 
-func TestTrustedRemoteMatchSeparator(t *testing.T) {
-	// `*` does not match over `/`, `**` does.
-	single := []string{"https://github.com/my-org/*"}
-	double := []string{"https://github.com/my-org/**"}
+		// A `https://` pattern must not match the scp syntax url of the
+		// same repository and vice versa.
+		{"https pattern with scp url", []string{myOrg},
+			"git@github.com:my-org/my-repo.git", false, ""},
+		{"scp pattern with scp url", []string{"git@github.com:my-org/**"},
+			"git@github.com:my-org/my-repo.git", true, "git@github.com:my-org/**"},
+		{"scp pattern with https url", []string{"git@github.com:my-org/**"},
+			"https://github.com/my-org/my-repo.git", false, ""},
 
-	isTrusted, _ := matchesTrustedRemote(single, "https://github.com/my-org/my-repo.git")
-	assert.True(t, isTrusted)
+		// A repository without a remote url must never be trusted,
+		// also not by patterns matching everything.
+		{"no url with star", []string{"*"}, "", false, ""},
+		{"no url with double star", []string{"**"}, "", false, ""},
+		{"whitespace url with double star", []string{"**"}, "  ", false, ""},
 
-	isTrusted, _ = matchesTrustedRemote(single, "https://github.com/my-org/sub/my-repo.git")
-	assert.False(t, isTrusted)
+		// Empty patterns are skipped and must not match.
+		{"no patterns", nil,
+			"https://github.com/my-org/my-repo.git", false, ""},
+		{"empty patterns", []string{"", " "},
+			"https://github.com/my-org/my-repo.git", false, ""},
 
-	isTrusted, _ = matchesTrustedRemote(double, "https://github.com/my-org/sub/my-repo.git")
-	assert.True(t, isTrusted)
-}
+		// The pattern is matched against the whole url, an url only
+		// containing it must not match.
+		{"not anchored", []string{myOrg},
+			"https://evil.com/x?url=https://github.com/my-org/my-repo.git", false, ""},
+		{"similar looking host", []string{myOrg},
+			"https://github.com.evil.com/my-org/my-repo.git", false, ""},
 
-func TestTrustedRemoteMatchScpSyntax(t *testing.T) {
-	// A `https://` pattern must not match the scp syntax url of the
-	// same repository and vice versa.
-	https := []string{"https://github.com/my-org/**"}
-	scp := []string{"git@github.com:my-org/**"}
+		{"first matching pattern", []string{"https://github.com/other-org/**", myOrg},
+			"https://github.com/my-org/my-repo.git", true, myOrg},
 
-	isTrusted, _ := matchesTrustedRemote(https, "git@github.com:my-org/my-repo.git")
-	assert.False(t, isTrusted)
-
-	isTrusted, _ = matchesTrustedRemote(scp, "git@github.com:my-org/my-repo.git")
-	assert.True(t, isTrusted)
-
-	isTrusted, _ = matchesTrustedRemote(scp, "https://github.com/my-org/my-repo.git")
-	assert.False(t, isTrusted)
-}
-
-func TestTrustedRemoteMatchNoRemote(t *testing.T) {
-	// A repository without a remote url must never be trusted,
-	// also not by patterns matching everything.
-	isTrusted, _ := matchesTrustedRemote([]string{"*"}, "")
-	assert.False(t, isTrusted)
-
-	isTrusted, _ = matchesTrustedRemote([]string{"**"}, "")
-	assert.False(t, isTrusted)
-}
-
-func TestTrustedRemoteMatchNoPatterns(t *testing.T) {
-	isTrusted, _ := matchesTrustedRemote(nil, "https://github.com/my-org/my-repo.git")
-	assert.False(t, isTrusted)
-
-	// Empty patterns are skipped and must not match.
-	isTrusted, _ = matchesTrustedRemote(
-		[]string{"", " "}, "https://github.com/my-org/my-repo.git")
-	assert.False(t, isTrusted)
-}
-
-func TestTrustedRemoteMatchNotAnchored(t *testing.T) {
-	patterns := []string{"https://github.com/my-org/**"}
-
-	// The pattern is matched against the whole url, an url only
-	// containing it must not match.
-	isTrusted, _ := matchesTrustedRemote(
-		patterns, "https://evil.com/x?url=https://github.com/my-org/my-repo.git")
-	assert.False(t, isTrusted)
-
-	// A similar looking host must not match.
-	isTrusted, _ = matchesTrustedRemote(
-		patterns, "https://github.com.evil.com/my-org/my-repo.git")
-	assert.False(t, isTrusted)
-}
-
-func TestTrustedRemoteMatchFirstPattern(t *testing.T) {
-	patterns := []string{
-		"https://github.com/other-org/**",
-		"https://github.com/my-org/**",
+		// Malformed patterns are skipped with a warning.
+		{"malformed pattern", []string{"https://github.com/my-org/["},
+			"https://github.com/my-org/my-repo.git", false, ""},
+		{"malformed pattern skipped", []string{"https://github.com/my-org/[", myOrg},
+			"https://github.com/my-org/my-repo.git", true, myOrg},
 	}
 
-	isTrusted, pattern := matchesTrustedRemote(
-		patterns, "https://github.com/my-org/my-repo.git")
-	assert.True(t, isTrusted)
-	assert.Equal(t, patterns[1], pattern)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			isTrusted, pattern := matchesTrustedRemote(log, test.patterns, test.url)
+			assert.Equal(t, test.trusted, isTrusted)
+			assert.Equal(t, test.pattern, pattern)
+		})
+	}
 }
 
-// runGitIn runs Git inside `dir`.
-func runGitIn(t *testing.T, dir string, args ...string) {
+// testRepo is a repository with an isolated global and system Git configuration.
+type testRepo struct {
+	dir string
+	env []string
+}
+
+// newTestRepo creates a repository with remote `origin` set to `originURL`
+// (if not empty) and an isolated global and system Git configuration.
+func newTestRepo(t *testing.T, originURL string) testRepo {
+	t.Helper()
+
+	configDir := t.TempDir()
+	globalConfig := path.Join(configDir, "gitconfig-global")
+	assert.NoError(t, os.WriteFile(globalConfig, []byte(""), cm.DefaultFileModeFile))
+
+	r := testRepo{
+		dir: t.TempDir(),
+		// Isolate, such that the users configuration cannot influence the test.
+		env: []string{
+			"GIT_CONFIG_GLOBAL=" + globalConfig,
+			"GIT_CONFIG_SYSTEM=" + path.Join(configDir, "gitconfig-system"),
+		}}
+
+	r.git(t, "init")
+
+	if strs.IsNotEmpty(originURL) {
+		r.git(t, "config", "remote."+TrustedRemoteName+".url", originURL)
+	}
+
+	return r
+}
+
+// git runs Git inside the repository.
+func (r *testRepo) git(t *testing.T, args ...string) {
 	t.Helper()
 
 	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	cmd.Dir = r.dir
+	cmd.Env = append(os.Environ(), r.env...)
 	out, err := cmd.CombinedOutput()
 	assert.NoError(t, err, "git %v failed: %s", args, string(out))
 }
 
-// makeRepo creates a repository with remote `origin` set to `originURL`
-// (if not empty) and an isolated global and system Git configuration.
-func makeRepo(t *testing.T, originURL string) string {
-	t.Helper()
-
-	dir := t.TempDir()
-	globalConfig := path.Join(t.TempDir(), "gitconfig-global")
-
-	// Isolate, such that the users configuration cannot influence the test.
-	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
-	t.Setenv("GIT_CONFIG_SYSTEM", path.Join(t.TempDir(), "gitconfig-system"))
-	assert.NoError(t, os.WriteFile(globalConfig, []byte(""), cm.DefaultFileModeFile))
-
-	runGitIn(t, dir, "init")
-
-	if strs.IsNotEmpty(originURL) {
-		runGitIn(t, dir, "config", "remote."+TrustedRemoteName+".url", originURL)
-	}
-
-	return dir
+// gitx returns a Git context inside the repository.
+func (r *testRepo) gitx() *git.Context {
+	return git.NewCtxAt(r.dir, git.WithModifications(
+		func(builder *cm.CmdContextBuilder) *cm.CmdContextBuilder {
+			return builder.AddEnv(r.env)
+		}))
 }
 
-func makeTrustMarker(t *testing.T, dir string) {
+func (r *testRepo) makeTrustMarker(t *testing.T) {
 	t.Helper()
 
-	assert.NoError(t, os.MkdirAll(path.Join(dir, HooksDirName), cm.DefaultFileModeDirectory))
-	assert.NoError(t, os.WriteFile(GetTrustMarkerFile(dir), []byte(""), cm.DefaultFileModeFile))
+	assert.NoError(t, os.MkdirAll(path.Join(r.dir, HooksDirName), cm.DefaultFileModeDirectory))
+	assert.NoError(t, os.WriteFile(GetTrustMarkerFile(r.dir), []byte(""), cm.DefaultFileModeFile))
 }
 
 // isRepoTrusted reports `IsRepoTrusted` without and with an initialized
 // Git config cache, since the runner uses a cache.
-func isRepoTrusted(t *testing.T, dir string) (uncached bool, cached bool) {
+func (r *testRepo) isRepoTrusted(t *testing.T) (uncached bool, cached bool) {
 	t.Helper()
 
-	uncached, _, _ = IsRepoTrusted(git.NewCtxAt(dir), dir)
+	log, err := cm.CreateLogContext(false, false)
+	assert.NoError(t, err)
 
-	gitx := git.NewCtxAt(dir)
+	uncached, _, _ = IsRepoTrusted(log, r.gitx(), r.dir)
+
+	gitx := r.gitx()
 	assert.NoError(t, gitx.InitConfigCache(nil))
-	cached, _, _ = IsRepoTrusted(gitx, dir)
+	cached, _, _ = IsRepoTrusted(log, gitx, r.dir)
 
 	return
 }
 
 func TestRepoTrustedByRemoteNotConfigured(t *testing.T) {
-	dir := makeRepo(t, "https://github.com/my-org/my-repo.git")
+	r := newTestRepo(t, "https://github.com/my-org/my-repo.git")
 
-	uncached, cached := isRepoTrusted(t, dir)
+	uncached, cached := r.isRepoTrusted(t)
 	assert.False(t, uncached)
 	assert.False(t, cached)
 }
 
 func TestRepoTrustedByRemoteLocal(t *testing.T) {
-	dir := makeRepo(t, "https://github.com/my-org/my-repo.git")
-	runGitIn(t, dir, "config", "--add", GitCKTrustedRemotes, "https://github.com/my-org/**")
+	r := newTestRepo(t, "https://github.com/my-org/my-repo.git")
+	r.git(t, "config", "--add", GitCKTrustedRemotes, "https://github.com/my-org/**")
 
 	// No trust marker and no user interaction is needed.
-	uncached, cached := isRepoTrusted(t, dir)
+	uncached, cached := r.isRepoTrusted(t)
 	assert.True(t, uncached)
 	assert.True(t, cached)
 }
 
 func TestRepoTrustedByRemoteGlobal(t *testing.T) {
-	dir := makeRepo(t, "https://github.com/my-org/my-repo.git")
-	runGitIn(t, dir, "config", "--global", "--add",
+	r := newTestRepo(t, "https://github.com/my-org/my-repo.git")
+	r.git(t, "config", "--global", "--add",
 		GitCKTrustedRemotes, "https://github.com/my-org/**")
 
-	uncached, cached := isRepoTrusted(t, dir)
+	uncached, cached := r.isRepoTrusted(t)
 	assert.True(t, uncached)
 	assert.True(t, cached)
 }
 
 func TestRepoTrustedByRemoteOtherOrg(t *testing.T) {
-	dir := makeRepo(t, "https://github.com/other-org/my-repo.git")
-	runGitIn(t, dir, "config", "--global", "--add",
+	r := newTestRepo(t, "https://github.com/other-org/my-repo.git")
+	r.git(t, "config", "--global", "--add",
 		GitCKTrustedRemotes, "https://github.com/my-org/**")
 
-	uncached, cached := isRepoTrusted(t, dir)
+	uncached, cached := r.isRepoTrusted(t)
 	assert.False(t, uncached)
 	assert.False(t, cached)
 }
 
 func TestRepoTrustedByRemoteWithoutRemote(t *testing.T) {
-	dir := makeRepo(t, "")
-	runGitIn(t, dir, "config", "--global", "--add", GitCKTrustedRemotes, "**")
+	r := newTestRepo(t, "")
+	r.git(t, "config", "--global", "--add", GitCKTrustedRemotes, "**")
 
 	// A repository without a remote is never trusted.
-	uncached, cached := isRepoTrusted(t, dir)
+	uncached, cached := r.isRepoTrusted(t)
 	assert.False(t, uncached)
 	assert.False(t, cached)
 }
 
-func TestRepoTrustedByRemoteDeniedByUser(t *testing.T) {
-	dir := makeRepo(t, "https://github.com/my-org/my-repo.git")
-	makeTrustMarker(t, dir)
-	runGitIn(t, dir, "config", "--global", "--add",
-		GitCKTrustedRemotes, "https://github.com/my-org/**")
-	runGitIn(t, dir, "config", GitCKTrustAll, "false")
+func TestRepoTrustedByTrustMarkerAndDeniedByUser(t *testing.T) {
+	r := newTestRepo(t, "https://github.com/my-org/my-repo.git")
+	r.makeTrustMarker(t)
+	r.git(t, "config", GitCKTrustAll, "true")
 
-	// The explicit trust setting of the user wins.
-	uncached, cached := isRepoTrusted(t, dir)
-	assert.False(t, uncached)
-	assert.False(t, cached)
-}
-
-func TestRepoTrustedByTrustMarkerOnly(t *testing.T) {
-	dir := makeRepo(t, "https://github.com/other-org/my-repo.git")
-	makeTrustMarker(t, dir)
-	runGitIn(t, dir, "config", GitCKTrustAll, "true")
-
-	uncached, cached := isRepoTrusted(t, dir)
+	// Trusted by the trust marker only, no trusted remotes are configured.
+	uncached, cached := r.isRepoTrusted(t)
 	assert.True(t, uncached)
 	assert.True(t, cached)
+
+	r.git(t, "config", "--global", "--add",
+		GitCKTrustedRemotes, "https://github.com/my-org/**")
+	r.git(t, "config", GitCKTrustAll, "false")
+
+	// The explicit trust setting of the user wins over the trusted remotes.
+	uncached, cached = r.isRepoTrusted(t)
+	assert.False(t, uncached)
+	assert.False(t, cached)
 }
 
 func TestRepoTrustedByRemoteShowsNoPrompt(t *testing.T) {
-	dir := makeRepo(t, "https://github.com/my-org/my-repo.git")
-	makeTrustMarker(t, dir)
-	runGitIn(t, dir, "config", "--global", "--add",
+	r := newTestRepo(t, "https://github.com/my-org/my-repo.git")
+	r.makeTrustMarker(t)
+	r.git(t, "config", "--global", "--add",
 		GitCKTrustedRemotes, "https://github.com/my-org/**")
 
-	isTrusted, hasTrustFile, trustAllSet := IsRepoTrusted(git.NewCtxAt(dir), dir)
+	log, err := cm.CreateLogContext(false, false)
+	assert.NoError(t, err)
+
+	isTrusted, hasTrustFile, trustAllSet := IsRepoTrusted(log, r.gitx(), r.dir)
 	assert.True(t, isTrusted)
 	assert.True(t, hasTrustFile)
 	assert.False(t, trustAllSet)

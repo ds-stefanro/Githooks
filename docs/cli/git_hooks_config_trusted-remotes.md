@@ -32,7 +32,7 @@ git hooks config trusted-remotes [flags] [<pattern>...]
 
 ```
       --local    Use the local Git configuration.
-      --global   Use the global Git configuration (default).
+      --global   Use the global Git configuration (default if `--local` not given).
       --print    Print the setting.
       --add      Adds given trusted remote patterns `<pattern>`s.
       --reset    Reset the setting.
